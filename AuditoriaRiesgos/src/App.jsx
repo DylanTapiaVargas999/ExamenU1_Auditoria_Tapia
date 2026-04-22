@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Button, Form, Input, Popconfirm, Table, Modal, Layout, Menu, Typography, message } from 'antd';
+import { Button, Form, Input, Popconfirm, Table, Modal, Layout, Typography, message } from 'antd';
 import { LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import Login from './components/Login';
@@ -8,6 +8,7 @@ import { isAuthenticated, logout } from './services/LoginService';
 const { Header, Content, Footer } = Layout;
 const { Title, Text } = Typography;
 const EditableContext = React.createContext(null);
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
 // Editable Row Component
 const EditableRow = ({ index, ...props }) => {
@@ -128,65 +129,7 @@ const App = () => {
     tratamiento: ''
   });
 
-  // Show modal for adding new asset
-  const showModal = () => {
-    setIsModalVisible(true);
-  };
-
-  // Hide modal
-  const handleCancel = () => {
-    setIsModalVisible(false);
-  };
-  
-  // Handle deletion of a row
-  const handleDelete = (key) => {
-    const newData = dataSource.filter((item) => item.key !== key);
-    setDataSource(newData);
-  };
-
-  // Handle adding new asset (mock API call)
-  const handleOk = () => {
-    if (!newData.activo.trim()) {
-      message.error('Por favor ingresa un nombre de activo');
-      return;
-    }
-
-    setIsLoading(true);
-
-    // Mock API call with timeout
-    setTimeout(() => {
-      // Generate mock risks and impacts (but only use the first one)
-      const mockRiesgo = `Pérdida de ${newData.activo}`;
-      const mockImpacto = `Pérdida de información valiosa relacionada con ${newData.activo}`;
-
-      // Add a single row for this asset
-      addNewRow(newData.activo, mockRiesgo, mockImpacto);
-      
-      setIsModalVisible(false);
-      setIsLoading(false);
-      setSuggestEnabled(true);
-      message.success(`Activo "${newData.activo}" agregado con éxito`);
-    }, 1000);
-  };
-
-  // Add a single new row to the table
-  const addNewRow = (activo, riesgo, impacto) => {
-    // Create a single new row
-    const newRow = {
-      key: `${count}`,
-      activo,
-      riesgo,
-      impacto,
-      tratamiento: '-'
-    };
-    
-    // Add the single row to the dataSource
-    setDataSource([...dataSource, newRow]);
-    
-    // Increment count by 1
-    setCount(count + 1);
-    
-    // Reset form
+  const resetNewData = () => {
     setNewData({
       activo: '',
       riesgo: '',
@@ -195,36 +138,140 @@ const App = () => {
     });
   };
 
-  // Handle recommendation of treatments (mock API call)
-  const handleRecommendTreatment = () => {
+  // Show modal for adding new asset
+  const showModal = () => {
+    setIsModalVisible(true);
+  };
+
+  // Hide modal
+  const handleCancel = () => {
+    setIsModalVisible(false);
+    resetNewData();
+  };
+  
+  // Handle deletion of a row
+  const handleDelete = (key) => {
+    const newData = dataSource.filter((item) => item.key !== key);
+    setDataSource(newData);
+    if (newData.length === 0) {
+      setSuggestEnabled(false);
+    }
+  };
+
+  const createRowsFromAnalysis = (activo, riesgos, impactos) => {
+    const normalizedRisks = Array.isArray(riesgos) ? riesgos.filter(Boolean) : [];
+    const normalizedImpacts = Array.isArray(impactos) ? impactos.filter(Boolean) : [];
+
+    if (normalizedRisks.length === 0) {
+      return [{
+        activo,
+        riesgo: `Pérdida de ${activo}`,
+        impacto: `Pérdida de información valiosa relacionada con ${activo}`,
+        tratamiento: '-'
+      }];
+    }
+
+    return normalizedRisks.map((riesgo, index) => ({
+      activo,
+      riesgo,
+      impacto: normalizedImpacts[index] || normalizedImpacts[0] || `Impacto asociado a ${riesgo.toLowerCase()}`,
+      tratamiento: '-'
+    }));
+  };
+
+  // Handle adding new asset using backend analysis
+  const handleOk = async () => {
+    const activo = newData.activo.trim();
+
+    if (!activo) {
+      message.error('Por favor ingresa un nombre de activo');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/analizar-riesgos`, {
+        activo,
+      });
+
+      const rows = createRowsFromAnalysis(activo, response.data?.riesgos, response.data?.impactos);
+      addNewRows(rows);
+
+      setIsModalVisible(false);
+      resetNewData();
+      setSuggestEnabled(true);
+      message.success(`Activo "${activo}" agregado con éxito`);
+    } catch (error) {
+      const fallbackRows = createRowsFromAnalysis(activo);
+      addNewRows(fallbackRows);
+      setIsModalVisible(false);
+      resetNewData();
+      setSuggestEnabled(true);
+      console.error('Error al analizar riesgos:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add one or more rows to the table
+  const addNewRows = (rows) => {
+    const startKey = count;
+    const tableRows = rows.map((row, index) => ({
+      key: `${startKey + index}`,
+      ...row,
+    }));
+
+    setDataSource((currentData) => [...currentData, ...tableRows]);
+    setCount((currentCount) => currentCount + tableRows.length);
+  };
+
+  // Handle recommendation of treatments using backend analysis
+  const handleRecommendTreatment = async () => {
     if (dataSource.length === 0) {
       message.warning('No hay riesgos para recomendar tratamientos');
       return;
     }
 
     setIsRecommending(true);
-    
-    // Mock API call with timeout
-    setTimeout(() => {
-      const treatments = [
-        'Implementación de controles de acceso físico',
+
+    try {
+      const updatedRows = await Promise.all(
+        dataSource.map(async (item) => {
+          const response = await axios.post(`${API_BASE_URL}/sugerir-tratamiento`, {
+            activo: item.activo,
+            riesgo: item.riesgo,
+            impacto: item.impacto,
+          });
+
+          return {
+            ...item,
+            tratamiento: response.data?.tratamiento || item.tratamiento || '-',
+          };
+        })
+      );
+
+      setDataSource(updatedRows);
+      message.success('Tratamientos recomendados con éxito');
+    } catch (error) {
+      const fallbackTreatments = [
+        'Implementación de controles de acceso',
         'Copias de seguridad periódicas',
         'Cifrado de datos sensibles',
         'Capacitación de personal sobre seguridad',
-        'Implementación de firewall de nueva generación',
         'Monitoreo continuo de accesos',
-        'Desarrollo de políticas de seguridad'
       ];
-      
-      const newDataSource = dataSource.map(item => ({
+
+      const fallbackRows = dataSource.map((item, index) => ({
         ...item,
-        tratamiento: treatments[Math.floor(Math.random() * treatments.length)]
+        tratamiento: fallbackTreatments[index % fallbackTreatments.length],
       }));
-      
-      setDataSource(newDataSource);
+
+      setDataSource(fallbackRows);
+      console.error('Error al sugerir tratamientos:', error);
+    } finally {
       setIsRecommending(false);
-      message.success('Tratamientos recomendados con éxito');
-    }, 1500);
+    }
   };
 
   // Handle save after cell edit
@@ -347,7 +394,7 @@ const App = () => {
           
           <Modal
             title="Agregar nuevo activo"
-            visible={isModalVisible}
+            open={isModalVisible}
             onOk={handleOk}
             onCancel={handleCancel}
             okText="Agregar"

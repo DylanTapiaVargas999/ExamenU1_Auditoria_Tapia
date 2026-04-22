@@ -7,6 +7,7 @@ Identificación y gestión automatizada de riesgos en activos digitales, que uti
 - Análisis de impactos potenciales
 - Recomendaciones de mitigación alineadas con ISO 27001
 - Interfaz intuitiva para gestión de casos
+- Integración con IA local para analizar activos y sugerir tratamientos
 
 ## Tecnologías Implementadas
 
@@ -40,7 +41,6 @@ cd AuditoriaRiesgos
 
 ### 2. Configuración del FRONTEND
 ```bash
-cd frontend
 npm install
 npm run dev
 ```
@@ -79,6 +79,10 @@ Nota: Si encuentras problemas con la versión de Python, prueba con el numero de
 ```bash
 python3.9 app.py
 ```
+
+La aplicación del frontend consume estos endpoints de IA:
+- `POST /analizar-riesgos` para generar riesgos e impactos a partir de un activo
+- `POST /sugerir-tratamiento` para proponer un tratamiento por cada riesgo
 
 ## Solución de Problemas Comunes
 
